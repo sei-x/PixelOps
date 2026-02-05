@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PixelOps</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style></style>
+</head>
+<body class="bg-black flex items-center justify-center min-h-screen">
+
+  <div id="mainContainer" class="flex flex-col items-center space-y-4 max-w-xl text-center">
+    <input type="file" id="upload" accept="image/*" class="text-white"/>
+
+    <div class="flex space-x-4">
+      <button id="process" class="px-4 py-2 bg-neutral-200 hover:bg-cyan-400 text-black rounded-lg transition duration-300 ease-in-out">
+        Process Image
+      </button>
+      <button id="overlayNoise" class="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg transition duration-300 ease-in-out">
+        Restore Quality
+      </button>
+    </div>
+
+    <canvas id="canvas" class="hidden"></canvas>
+
+    <!-- instructions -->
+    <div class="text-white text-sm mt-4 p-4 border border-neutral-900 rounded-2xl bg-neutral-950">
+      <ul class="list-disc list-inside mt-0">
+        <p>1. Select your image and click <strong>process</strong></p>
+        <p>2. Save the result and run it through an AI image upscaler like <a href="https://www.waifu2x.net/" target="_blank" class="text-cyan-400 underline">waifu2x</a> (style: drawing, noise reduction: best)</p>
+        <p>3. Select the upscaled image and click <strong>restore quality</strong></p>
+      </ul>
+    </div>
+
+    <footer class="mt-8 text-xs text-white text-center">
+      made with ❤️ by sei
+    </footer>
+  </div>
+
+  <script>
+    function addNoiseToGrayLayer(ctx, width, height, amount=0.15, opacity=0.2) {
+      const imageData = ctx.getImageData(0, 0, width, height);
+      const data = imageData.data;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const gray = 128;
+        const u1 = Math.random();
+        const u2 = Math.random();
+        const randStdNormal = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+        const noise = randStdNormal * 255 * amount;
+        const noisyGray = gray + noise;
+
+        data[i]   = data[i]*(1-opacity) + noisyGray*opacity;
+        data[i+1] = data[i+1]*(1-opacity) + noisyGray*opacity;
+        data[i+2] = data[i+2]*(1-opacity) + noisyGray*opacity;
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+    }
+
+    let uploadedImage = null;
+    let originalImageData = null;
+
+    document.getElementById('upload').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const img = new Image();
+      img.onload = () => {
+        uploadedImage = img;
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        canvas.classList.remove('hidden');
+      };
+      img.src = URL.createObjectURL(file);
+    });
+
+    document.getElementById('process').addEventListener('click', () => {
+      if (!uploadedImage) return alert('Please select an image first');
+
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = 539;
+      canvas.height = 750;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.drawImage(uploadedImage, 0, 0, canvas.width, canvas.height);
+
+      addNoiseToGrayLayer(ctx, canvas.width, canvas.height, 0.15, 0.2);
+    });
+
+    document.getElementById('overlayNoise').addEventListener('click', () => {
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      const fileInput = document.getElementById('upload');
+
+      function applyOverlay() {
+        const width = canvas.width;
+        const height = canvas.height;
+
+        const baseImage = ctx.getImageData(0, 0, width, height);
+        const overlayImage = ctx.getImageData(0, 0, width, height);
+
+        const baseData = baseImage.data;
+        const overlayData = overlayImage.data;
+        const opacity = 0.4;
+
+        for (let i = 0; i < baseData.length; i += 4) {
+          for (let c = 0; c < 3; c++) {
+            const base = baseData[i + c] / 255;
+            const blend = overlayData[i + c] / 255;
+            const overlay = base < 0.5 ? (2 * base * blend) : (1 - 2 * (1 - base) * (1 - blend));
+            baseData[i + c] = (1 - opacity) * baseData[i + c] + opacity * overlay * 255;
+          }
+        }
+
+        ctx.putImageData(baseImage, 0, 0);
+
+        addNoiseToGrayLayer(ctx, width, height, 0.15, 0.08);
+
+        canvas.classList.remove('hidden');
+      }
+
+      if (canvas.width === 0 || canvas.height === 0) {
+        if (!fileInput.files[0]) return alert('Please select an image first');
+
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+          applyOverlay();
+        };
+        img.src = URL.createObjectURL(fileInput.files[0]);
+      } else {
+        applyOverlay();
+      }
+    });
+
+  </script>
+</body>
+</html>
