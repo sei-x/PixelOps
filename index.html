@@ -23,11 +23,12 @@
 
     <canvas id="canvas" class="hidden"></canvas>
 
-    <!-- instructions -->
+    <!-- info-->
     <div class="text-white text-sm mt-4 p-4 border border-neutral-900 rounded-2xl bg-neutral-950">
       <ul class="list-disc list-inside mt-0">
         <p>1. Select your image and click <strong>process</strong></p>
-        <p>2. Save the result and run it through an AI image upscaler like <a href="https://www.waifu2x.net/" target="_blank" class="text-cyan-400 underline">waifu2x</a> (style: drawing, noise reduction: best)</p>
+        <p>2. Save the result and run it through an AI image upscaler like <a href="https://www.waifu2x.net/" target="_blank" class="text-cyan-400 underline">waifu2x</a></p>
+        <p>(style: drawing, noise reduction: best)</p>
         <p>3. Select the upscaled image and click <strong>restore quality</strong></p>
       </ul>
     </div>
@@ -57,6 +58,17 @@
 
       ctx.putImageData(imageData, 0, 0);
     }
+
+    function randomShift(ctx, width, height, maxShift = 10) {
+      const dx = Math.floor((Math.random() * 2 - 1) * maxShift);
+      const dy = Math.floor((Math.random() * 2 - 1) * maxShift);
+
+      const imageData = ctx.getImageData(0, 0, width, height);
+
+      ctx.clearRect(0, 0, width, height);
+
+      ctx.putImageData(imageData, dx, dy);
+      }
 
     let uploadedImage = null;
     let originalImageData = null;
@@ -98,6 +110,8 @@
       ctx.drawImage(uploadedImage, 0, 0, canvas.width, canvas.height);
 
       addNoiseToGrayLayer(ctx, canvas.width, canvas.height, 0.15, 0.2);
+
+      randomShift(ctx, canvas.width, canvas.height, 10);
     });
 
     document.getElementById('overlayNoise').addEventListener('click', () => {
