@@ -5,46 +5,71 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PixelOps</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <style></style>
+  <style>
+    @keyframes pulse-fx {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 2px 0 rgba(0,200,255,0); }
+      50%      { transform: scale(1); box-shadow: 0 0 8px 4px rgba(0,200,255,1); }
+    }
+    .pulse-fx {
+      border: 0px solid rgba(0,200,255,0.8);
+      border-radius: 0.5rem;
+      animation: pulse-fx 3s linear 2;
+    }
+  </style>
 </head>
 <body class="bg-black flex items-center justify-center min-h-screen">
 
-  <div id="mainContainer" class="flex flex-col items-center space-y-4 max-w-xl text-center">
+  <div id="mainContainer" class="flex flex-col items-center space-y-4 max-w-xl text-center pt-4">
     <input type="file" id="upload" accept="image/*" class="text-white"/>
 
     <div class="flex space-x-4">
-      <button id="process" class="px-4 py-2 bg-neutral-200 hover:bg-cyan-400 text-black rounded-lg transition duration-300 ease-in-out">
+      <button id="process" class="px-3 py-1 bg-neutral-200 hover:bg-cyan-400 text-black rounded-lg transition duration-300 ease-in-out  disabled:cursor-not-allowed pulse-fx" disabled>
         Process Image
       </button>
-      <button id="overlayNoise" class="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg transition duration-300 ease-in-out">
+      <button id="save" class="px-3 py-1 bg-green-600 text-white rounded-lg hidden">
+        Save
+      </button>
+      <button id="overlayNoise" class="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg transition duration-300 ease-in-out disabled:cursor-not-allowed" disabled>
         Restore Quality
       </button>
     </div>
 
-    <canvas id="canvas" class="hidden"></canvas>
-
-    <!-- info-->
-    <div class="text-white text-sm mt-4 p-4 border border-neutral-900 rounded-2xl bg-neutral-950">
-      <ul class="list-disc list-inside mt-0">
-        <p>1. Select your image and click <strong>process</strong></p>
+    <!-- info -->
+    <div class="text-white text-base mt-4 p-4 border border-neutral-900 rounded-2xl bg-neutral-950">
+      <div class="list-disc list-inside mt-0">
+        <p>1. Select your image and click <strong >process</strong></p>
         <p>2. Save the result and run it through an AI image upscaler like <a href="https://www.waifu2x.net/" target="_blank" class="text-cyan-400 underline">waifu2x</a></p>
         <p>(style: drawing, noise reduction: best)</p>
         <p>3. Select the upscaled image and click <strong>restore quality</strong></p>
-      </ul>
+      </div>
     </div>
 
-    <footer class="mt-8 text-xs text-white text-center">
+    <footer class="mt-8 text-xs text-neutral-500 text-center">
       made with ❤️ by sei
     </footer>
+
+    <canvas id="canvas" class="hidden"></canvas>
   </div>
 
   <script>
-    function addNoiseToGrayLayer(ctx, width, height, amount=0.15, opacity=0.2) {
+    // config
+    let target_width = 539;
+    let target_height = 750;
+    let max_shift = 10;
+    let compression = 0.7;
+
+    let uploadedImage = null;
+    let originalImageData = null;
+
+    const save = document.getElementById('save');
+
+    // gaussian
+    function gaussianPass(ctx, width, height, amount=0.15, opacity=0.2) {
       const imageData = ctx.getImageData(0, 0, width, height);
       const data = imageData.data;
 
       for (let i = 0; i < data.length; i += 4) {
-        const gray = 128;
+        const gray = 128; // #808080 blend
         const u1 = Math.random();
         const u2 = Math.random();
         const randStdNormal = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
@@ -59,19 +84,63 @@
       ctx.putImageData(imageData, 0, 0);
     }
 
-    function randomShift(ctx, width, height, maxShift = 10) {
+    // ctx shift
+    function randomShift(ctx, width, height, maxShift = max_shift) {
+      // random range shift
       const dx = Math.floor((Math.random() * 2 - 1) * maxShift);
       const dy = Math.floor((Math.random() * 2 - 1) * maxShift);
-
+      // copy current canvas
       const imageData = ctx.getImageData(0, 0, width, height);
-
+      // clear canvas
       ctx.clearRect(0, 0, width, height);
-
+      // draw shifted
       ctx.putImageData(imageData, dx, dy);
+    }
+
+
+    // overlay
+    function applyOverlay(canvas, ctx) {
+      const width = canvas.width;
+      const height = canvas.height;
+
+      const baseImage = ctx.getImageData(0, 0, width, height);
+      const overlayImage = ctx.getImageData(0, 0, width, height);
+
+      const baseData = baseImage.data;
+      const overlayData = overlayImage.data;
+      const opacity = 0.4;
+
+      for (let i = 0; i < baseData.length; i += 4) {
+        for (let c = 0; c < 3; c++) {
+          const base = baseData[i + c] / 255;
+          const blend = overlayData[i + c] / 255;
+          const overlay =
+            base < 0.5
+              ? (2 * base * blend)
+              : (1 - 2 * (1 - base) * (1 - blend));
+
+          baseData[i + c] =
+            (1 - opacity) * baseData[i + c] + opacity * overlay * 255;
+        }
       }
 
-    let uploadedImage = null;
-    let originalImageData = null;
+      ctx.putImageData(baseImage, 0, 0);
+
+      gaussianPass(ctx, width, height, 0.15, 0.08);
+
+      canvas.classList.remove('hidden');
+    }
+
+    function canvasState(ctx, width, height) {
+      const data = ctx.getImageData(0, 0, width, height).data;
+
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] !== 0) {
+          return true; // 1px or more off alpha channel
+        }
+      }
+      return false;
+    }
 
     document.getElementById('upload').addEventListener('change', (e) => {
       const file = e.target.files[0];
@@ -89,76 +158,55 @@
 
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
+        // save original pixels
         originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
         canvas.classList.remove('hidden');
+
+        // enable buttons
+        document.getElementById('process').disabled = false;
+        document.getElementById('overlayNoise').disabled = false;
       };
       img.src = URL.createObjectURL(file);
     });
 
     document.getElementById('process').addEventListener('click', () => {
-      if (!uploadedImage) return alert('Please select an image first');
+      if (!uploadedImage) return alert('select an image first');
 
       const canvas = document.getElementById('canvas');
       const ctx = canvas.getContext('2d');
 
-      canvas.width = 539;
-      canvas.height = 750;
+      canvas.width = target_width;
+      canvas.height = target_height;
 
+      // clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
       ctx.drawImage(uploadedImage, 0, 0, canvas.width, canvas.height);
+      gaussianPass(ctx, canvas.width, canvas.height, 0.15, 0.2);
+      randomShift(ctx, canvas.width, canvas.height, max_shift);
 
-      addNoiseToGrayLayer(ctx, canvas.width, canvas.height, 0.15, 0.2);
-
-      randomShift(ctx, canvas.width, canvas.height, 10);
+      // show save button
+      save.classList.remove('hidden');
     });
 
     document.getElementById('overlayNoise').addEventListener('click', () => {
       const canvas = document.getElementById('canvas');
       const ctx = canvas.getContext('2d');
-      const fileInput = document.getElementById('upload');
 
-      function applyOverlay() {
-        const width = canvas.width;
-        const height = canvas.height;
-
-        const baseImage = ctx.getImageData(0, 0, width, height);
-        const overlayImage = ctx.getImageData(0, 0, width, height);
-
-        const baseData = baseImage.data;
-        const overlayData = overlayImage.data;
-        const opacity = 0.4;
-
-        for (let i = 0; i < baseData.length; i += 4) {
-          for (let c = 0; c < 3; c++) {
-            const base = baseData[i + c] / 255;
-            const blend = overlayData[i + c] / 255;
-            const overlay = base < 0.5 ? (2 * base * blend) : (1 - 2 * (1 - base) * (1 - blend));
-            baseData[i + c] = (1 - opacity) * baseData[i + c] + opacity * overlay * 255;
-          }
-        }
-
-        ctx.putImageData(baseImage, 0, 0);
-
-        addNoiseToGrayLayer(ctx, width, height, 0.15, 0.08);
-
-        canvas.classList.remove('hidden');
+      if (!canvasState(ctx, canvas.width, canvas.height)) {
+        return alert('no image to restore');
       }
 
-      if (canvas.width === 0 || canvas.height === 0) {
-        if (!fileInput.files[0]) return alert('Please select an image first');
+      applyOverlay(canvas, ctx);
+    });
 
-        const img = new Image();
-        img.onload = () => {
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-          applyOverlay();
-        };
-        img.src = URL.createObjectURL(fileInput.files[0]);
-      } else {
-        applyOverlay();
-      }
+    // save button listener
+    save.addEventListener('click', () => {
+      const canvas = document.getElementById('canvas');
+      const link = document.createElement('a');
+      link.download = 'pixelops_result.jpg';
+      link.href = canvas.toDataURL('image/jpeg', compression); // quality .8
+      link.click();
     });
 
   </script>
