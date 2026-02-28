@@ -20,19 +20,34 @@
 <body class="bg-black flex items-center justify-center min-h-screen">
 
   <div id="mainContainer" class="flex flex-col items-center space-y-4 max-w-xl text-center pt-4">
-    <input type="file" id="upload" accept="image/*" class="text-white"/>
+    <input type="file" id="upload" accept="image/*" class="text-white text-sm font-mono"/>
+
+    <div id="status" class="flex space-x-4 text-sm font-mono text-green-400">loading...</div>
+
+    <div id="controls" class="flex flex-col items-center space-x-2 text-sm text-white font-mono hidden">
+      <div class="flex items-center justify-between w-full">
+        <label for="scaleSlider">scale target:</label>
+        <input id="scaleSlider" type="range" min="128" max="2048" step="1" value="750" class="flex-1 mx-2 accent-cyan-400">
+        <span id="scaleValue" class="w-12 text-right">750</span>
+      </div>
+      <div class="flex items-center justify-between w-full">
+        <label for="alphaSlider">alpha blend:</label>
+        <input id="alphaSlider" type="range" min="0" max="1" step="0.01" value="0.3" class="flex-1 mx-2 accent-cyan-400">
+        <span id="alphaValue" class="w-12 text-right">0.30</span>
+      </div>
+    </div>
 
     <div class="flex space-x-4">
-      <button id="process" class="px-3 py-1 bg-neutral-200 hover:bg-cyan-400 text-black rounded-lg transition duration-300 ease-in-out  disabled:cursor-not-allowed" disabled>
-        Process Image
-      </button>
-      <button id="save" class="px-3 py-1 bg-green-600 text-white rounded-lg hidden">
+      <button id="save" class="px-3 py-1 bg-neutral-900 hover:bg-neutral-700 text-green-400 rounded-lg transition duration-300 ease-in-out  font-mono hidden">
         Save
       </button>
-      <button id="addGrain" class="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg transition duration-300 ease-in-out disabled:cursor-not-allowed hidden" disabled>
-        Restore Quality
+      <button id="process" class="px-3 py-1 bg-neutral-200 hover:bg-cyan-400 text-black rounded-lg transition duration-300 ease-in-out  disabled:cursor-not-allowed pulse-fx font-mono" disabled>
+        Process Image
       </button>
-      <button id="debug" class="px-3 py-1 bg-neutral-900 hover:bg-neutral-700 text-green-400 rounded-lg transition duration-300 ease-in-out hidden">
+      <button id="aux" class="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg transition duration-300 ease-in-out disabled:cursor-not-allowed font-mono" disabled>
+        Detect Markers
+      </button>
+      <button id="debug" class="px-3 py-1 bg-neutral-900 hover:bg-neutral-700 text-green-400 rounded-lg transition duration-300 ease-in-out disabled:cursor-not-allowed font-mono hidden" disabled>
         Debug
       </button>
     </div>
@@ -83,8 +98,9 @@
     let uploadedImage = null;
     let originalImageData = null;
 
-    const save = document.getElementById('save');
     const canvas = document.getElementById('canvas');
+    const save = document.getElementById('save');
+    const status = document.getElementById('status');
 
     // canvas scaling
     function resizeCanvasToTarget(canvas, img) {
@@ -103,7 +119,7 @@
       }
     }
 
-    // overlay-blended grayscale noise
+    // grayscale noise
     function addOverlayNoise(layerCanvas, strength = 1) {
       const ctx = layerCanvas.getContext('2d');
       const width = layerCanvas.width;
@@ -119,7 +135,7 @@
         for (let c = 0; c < 3; c++) {
           let base = data[i + c] / 255; // normalize to 0..1
 
-          // overlay
+          // overlay blend
           let overlay;
           if (base < 0.5) {
             overlay = 2 * base * (0.5 + noise/2); // blend with mid-gray + noise
@@ -202,49 +218,52 @@
       ctx.putImageData(imageData, dx, dy);
     }
 
-    // restore quality -- not needed anymore
-    function addGrain(canvas, ctx) {
-      const width = canvas.width;
-      const height = canvas.height;
-
-      const baseImage = ctx.getImageData(0, 0, width, height);
-      const overlayImage = ctx.getImageData(0, 0, width, height);
-
-      const baseData = baseImage.data;
-      const overlayData = overlayImage.data;
-      const opacity = 0.4;
-
-      for (let i = 0; i < baseData.length; i += 4) {
-        for (let c = 0; c < 3; c++) {
-          const base = baseData[i + c] / 255;
-          const blend = overlayData[i + c] / 255;
-          const overlay =
-            base < 0.5
-              ? (2 * base * blend)
-              : (1 - 2 * (1 - base) * (1 - blend));
-
-          baseData[i + c] =
-            (1 - opacity) * baseData[i + c] + opacity * overlay * 255;
-        }
+    // detect markers
+    async function Laplacian() {
+      if (!(cv instanceof Object)) {
+        console.error("ocv is not loaded yet");
+        return;
       }
 
-      ctx.putImageData(baseImage, 0, 0);
+      let ctx = canvas.getContext('2d');
 
-      processImg(ctx, width, height, 0.15, 0.08);
+      // grab current canvas image
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-      canvas.classList.remove('hidden');
+      // create ocv mats
+      let src = cv.matFromImageData(imageData);
+      let gray = new cv.Mat();
+      let dst16 = new cv.Mat();
+      let dst = new cv.Mat();
+
+      // convert to grayscale
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+      // blur a bit to reduce noise
+      cv.GaussianBlur(gray, gray, new cv.Size(3,3), 0);
+
+      // 3x3 kernel, 16-bit to avoid truncation
+      cv.Laplacian(gray, dst16, cv.CV_16S, 3);
+
+      // convert back to 8-bit for display
+      cv.convertScaleAbs(dst16, dst);
+
+      // show result back on canvas
+      cv.imshow('canvas', dst);
+
+      // cleanup
+      src.delete();
+      gray.delete();
+      dst16.delete();
+      dst.delete();
     }
 
-    // do we have data in canvas?
-    function canvasState(ctx, width, height) {
-      const data = ctx.getImageData(0, 0, width, height).data;
-
-      for (let i = 3; i < data.length; i += 4) {
-        if (data[i] !== 0) {
-          return true; // 1px or more off alpha channel
-        }
-      }
-      return false;
+    // update status when ocv is ready
+    function ocvLoaded() {
+      setTimeout(() => {
+        // hide the status div
+        status.style.display = 'none';
+      }, 1000);
     }
 
     // upload listener
@@ -274,7 +293,7 @@
 
         // enable buttons
         document.getElementById('process').disabled = false;
-        document.getElementById('addGrain').disabled = false;
+        document.getElementById('aux').disabled = false;
       };
       img.src = URL.createObjectURL(file);
     });
@@ -296,20 +315,10 @@
       processImg(ctx, canvas.width, canvas.height, noise_strength, alpha_blend);  // old values 0.15 str 0.2 alpha
       randomShift(ctx, canvas.width, canvas.height, max_shift);
 
-      // show save button
+      // show sve button and disable aux (detect markers)
       save.classList.remove('hidden');
-    });
+      document.getElementById('aux').disabled = true;
 
-    // add grain
-    document.getElementById('addGrain').addEventListener('click', () => {
-      const canvas = document.getElementById('canvas');
-      const ctx = canvas.getContext('2d');
-
-      if (!canvasState(ctx, canvas.width, canvas.height)) {
-        return alert('no image to process');
-      }
-
-      addGrain(canvas, ctx);
     });
 
     // save button listener
@@ -321,13 +330,19 @@
       link.click();
     });
 
-    // disable canvas m2 and long-press
+    // aux button listener
+    document.getElementById('aux').addEventListener('click', async () => {
+      if (!uploadedImage) return alert('select an image first');
+      await Laplacian();
+      // show save button
+      save.classList.remove('hidden');
+      document.getElementById('aux').disabled = true;
+    });
+
+    // disable canvas m2
     canvas.addEventListener('contextmenu', function(e) {
       e.preventDefault();
     });
-    canvas.addEventListener('touchstart', function(e) {
-      e.preventDefault();
-    }, { passive: false });
 
     // debug
     document.getElementById('debug').addEventListener('click', () => { 
@@ -373,5 +388,7 @@
     });
 
   </script>
+
+  <script async src="opencv.js" type="text/javascript" onload="ocvLoaded()"></script>
 </body>
 </html>
