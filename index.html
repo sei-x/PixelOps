@@ -19,43 +19,53 @@
 </head>
 <body class="bg-black flex items-center justify-center min-h-screen">
 
-  <div id="mainContainer" class="flex flex-col items-center space-y-4 max-w-xl text-center pt-4">
-    <input type="file" id="upload" accept="image/*" class="text-white text-sm font-mono"/>
+  <div id="mainContainer" class="flex flex-col items-center space-y-4 max-w-4xl text-center pt-4">
 
     <div id="status" class="flex space-x-4 text-sm font-mono text-green-400">loading...</div>
 
-    <div id="controls" class="flex flex-col items-center space-x-2 text-sm text-white font-mono hidden">
-      <div class="flex items-center justify-between w-full">
+    <input type="file" id="upload" accept="image/*" class="text-white text-sm font-mono pulse-fx"/>
+
+    <div class="flex space-x-4">
+      <button id="save" class="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-green-400 rounded-lg transition duration-300 ease-in-out  font-mono hidden">
+        Save
+      </button>
+      <button id="process" class="px-3 py-1 bg-neutral-200 hover:bg-cyan-400 text-black rounded-lg transition duration-300 ease-in-out  disabled:cursor-not-allowed font-mono" disabled>
+        Process Image
+      </button>
+      <button id="aux" class="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg transition duration-300 ease-in-out disabled:cursor-not-allowed font-mono hidden" disabled>
+        Detect Markers (deprecated)
+      </button>
+      <button id="tm" class="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg transition duration-300 ease-in-out disabled:cursor-not-allowed font-mono" disabled>
+        Tag Markers
+      </button>
+      <button id="debug" class="px-3 py-1 bg-neutral-900 hover:bg-neutral-700 text-red-400 rounded-lg transition duration-300 ease-in-out disabled:cursor-not-allowed font-mono" disabled>
+        Debug
+      </button>
+    </div>
+
+    <div id="controls" class="flex flex-col items-center space-x-2 text-sm text-white font-mono">
+      <div class="flex items-center justify-between w-full hidden">
         <label for="scaleSlider">scale target:</label>
         <input id="scaleSlider" type="range" min="128" max="2048" step="1" value="750" class="flex-1 mx-2 accent-cyan-400">
         <span id="scaleValue" class="w-12 text-right">750</span>
       </div>
-      <div class="flex items-center justify-between w-full">
+      <div class="flex items-center justify-between w-full hidden">
         <label for="alphaSlider">alpha blend:</label>
         <input id="alphaSlider" type="range" min="0" max="1" step="0.01" value="0.3" class="flex-1 mx-2 accent-cyan-400">
         <span id="alphaValue" class="w-12 text-right">0.30</span>
       </div>
-    </div>
-
-    <div class="flex space-x-4">
-      <button id="save" class="px-3 py-1 bg-neutral-900 hover:bg-neutral-700 text-green-400 rounded-lg transition duration-300 ease-in-out  font-mono hidden">
-        Save
-      </button>
-      <button id="process" class="px-3 py-1 bg-neutral-200 hover:bg-cyan-400 text-black rounded-lg transition duration-300 ease-in-out  disabled:cursor-not-allowed pulse-fx font-mono" disabled>
-        Process Image
-      </button>
-      <button id="aux" class="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg transition duration-300 ease-in-out disabled:cursor-not-allowed font-mono" disabled>
-        Detect Markers
-      </button>
-      <button id="debug" class="px-3 py-1 bg-neutral-900 hover:bg-neutral-700 text-green-400 rounded-lg transition duration-300 ease-in-out disabled:cursor-not-allowed font-mono hidden" disabled>
-        Debug
-      </button>
+      <div class="flex items-center justify-between w-full">
+        <label for="thresholdSlider">tag sensitivity:</label>
+        <input id="thresholdSlider" type="range" min="0" max="1" step="0.01" value="0.8" class="flex-1 mx-2 accent-cyan-400">
+        <span id="thresholdValue" class="w-12 text-right">0.8</span>
+        <span class="ml-2 text-xs">(higher = closer match)</span>
+      </div>
     </div>
 
     <!-- might add these later -->
     <div class="flex space-x-4 hidden">
       <label class="flex items-center space-x-3">
-        <input type="checkbox" class="form-checkbox h-4 w-4 border-gray-300 rounded accent-cyan-400"/>
+        <input type="checkbox" class="form-checkbox h-4 w-4 border-gray-300 rounded accent-cyan-400 selected"/>
           <span class="text-white text-sm font-mono">
             OpenCV denoise
           </span>
@@ -72,11 +82,9 @@
 
     <!-- info -->
     <div class="text-white text-base mt-4 p-4 border border-neutral-900 rounded-2xl bg-neutral-950">
-      <div class="list-disc list-inside mt-0">
-        <p>1. Select your image and click <strong >process</strong></p>
-        <p>2. Save the result and run it through an AI image upscaler like <a href="https://www.waifu2x.net/" target="_blank" class="text-cyan-400 underline">waifu2x</a></p>
-        <p>(style: drawing, noise reduction: best)</p>
-        <p class="hidden">3. Select the upscaled image and click <strong>restore quality</strong></p>
+      <div class="list-disc list-inside mt-0 text-sm">
+        <p>Processed images must be denoised with something like <a href="https://www.waifu2x.net/" target="_blank" class="text-cyan-400 underline">waifu2x</a> (style: art/drawing, noise reduction: best)</p>
+        <p>Tag Markers ONLY works on original size images</p>
       </div>
     </div>
 
@@ -85,6 +93,9 @@
     </footer>
 
     <canvas id="canvas" class="hidden"></canvas>
+    <canvas id="canvas2" class="hidden"></canvas>
+    <canvas id="canvas3" class="hidden"></canvas>
+
   </div>
 
   <script>
@@ -93,12 +104,18 @@
     let max_shift = 10;
     let compression = 0.7;
     let noise_strength = 0.9;
-    let alpha_blend = 0.3;
+    let alpha_blend = 0.2;
+
+    const thresholdSlider = document.getElementById('thresholdSlider');
+    const thresholdValue = document.getElementById('thresholdValue');
+    let threshold = parseFloat(thresholdSlider.value);
+    //let threshold = 0.8;
 
     let uploadedImage = null;
     let originalImageData = null;
 
     const canvas = document.getElementById('canvas');
+    const canvas2 = document.getElementById('canvas2');
     const save = document.getElementById('save');
     const status = document.getElementById('status');
 
@@ -218,7 +235,7 @@
       ctx.putImageData(imageData, dx, dy);
     }
 
-    // detect markers
+    // laplacian (detect markers) --deprecated
     async function Laplacian() {
       if (!(cv instanceof Object)) {
         console.error("ocv is not loaded yet");
@@ -256,7 +273,113 @@
       gray.delete();
       dst16.delete();
       dst.delete();
+
+      // disable buttons
+      document.getElementById('tm').disabled = true;
     }
+
+    //----------------------------------------- TM --------------------------------------//
+
+    document.getElementById('tm').onclick = () => {
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const mat = cv.matFromImageData(imageData);
+
+        // laplacian preprocessing
+        function applyLaplacian(mat) {
+            const gray = new cv.Mat();
+            const dst16 = new cv.Mat();
+            const dst = new cv.Mat();
+
+            cv.cvtColor(mat, gray, cv.COLOR_RGBA2GRAY);
+            cv.GaussianBlur(gray, gray, new cv.Size(3,3), 0);
+            cv.Laplacian(gray, dst16, cv.CV_16S, 3);
+            cv.convertScaleAbs(dst16, dst);
+
+            gray.delete();
+            dst16.delete();
+            return dst;
+        }
+
+        // load template asynchronously and run TM after image is loaded
+        const templateImg = new Image();
+        templateImg.src = "5K.png";   // make this an array with multiple samples
+        templateImg.onload = () => {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = templateImg.naturalWidth;
+            tempCanvas.height = templateImg.naturalHeight;
+            const tctx = tempCanvas.getContext('2d');
+            tctx.drawImage(templateImg, 0, 0);
+            let templateMat = cv.matFromImageData(tctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height));
+
+            // convert template to grayscale
+            const grayTemplate = new cv.Mat();
+            cv.cvtColor(templateMat, grayTemplate, cv.COLOR_RGBA2GRAY);
+            templateMat.delete();
+            templateMat = grayTemplate;
+
+            // draw template on canvas3                             //debug
+            //const canvas3 = document.getElementById('canvas3');   //debug
+            //canvas3.width = templateMat.cols;                     //debug
+            //canvas3.height = templateMat.rows;                    //debug
+            //cv.imshow('canvas3', templateMat);                    //debug
+
+            // apply laplacian to source image
+            const dst = applyLaplacian(mat);
+            //cv.imshow('canvas2', dst);                            //debug
+
+            // template matching
+            const resultCols = dst.cols - templateMat.cols + 1;
+            const resultRows = dst.rows - templateMat.rows + 1;
+            const result = new cv.Mat();
+            result.create(resultRows, resultCols, cv.CV_32FC1);
+
+            cv.matchTemplate(dst, templateMat, result, cv.TM_CCOEFF_NORMED);
+            cv.normalize(result, result, 0, 1, cv.NORM_MINMAX, -1);
+
+            // threshold
+            //const threshold = 0.8; // or make slider later
+            const mask = new cv.Mat();
+            cv.threshold(result, mask, threshold, 1.0, cv.THRESH_BINARY);
+
+            console.log("threshold:", threshold);
+
+            // draw rectangles
+            const output = new cv.Mat();
+            cv.cvtColor(dst, output, cv.COLOR_GRAY2BGR);
+            const padding = 5;
+            for (let y = 0; y < result.rows; y++) {
+                for (let x = 0; x < result.cols; x++) {
+                    if (mask.floatAt(y, x) >= 1.0) {
+                        cv.rectangle(output, 
+                            {x: x - padding, y: y - padding}, 
+                            {x: x + templateMat.cols + padding, y: y + templateMat.rows + padding}, 
+                            new cv.Scalar(0, 255, 0, 255), 2);  // this is BGR(A) for some reason? 2 = pixel width
+                    }
+                }
+            }
+            // hide main canvas
+            canvas.classList.add('hidden');                          //debug
+
+            // show final output
+            canvas2.width = output.cols;
+            canvas2.height = output.rows;
+            cv.imshow('canvas2', output);
+
+            // cleanup / memory leak fix
+            dst.delete(); templateMat.delete(); result.delete(); mask.delete(); output.delete();
+            mat.delete();
+            canvas2.classList.remove('hidden');                      //debug
+
+            // disable buttons and enable save
+            document.getElementById('process').disabled = true;
+            document.getElementById('aux').disabled = true;
+            save.classList.remove('hidden');
+        };
+    };
+
+    //------------------------------------------------------------------------------------//
+
 
     // update status when ocv is ready
     function ocvLoaded() {
@@ -294,6 +417,7 @@
         // enable buttons
         document.getElementById('process').disabled = false;
         document.getElementById('aux').disabled = false;
+        document.getElementById('tm').disabled = false;
       };
       img.src = URL.createObjectURL(file);
     });
@@ -322,11 +446,23 @@
     });
 
     // save button listener
+    //save.addEventListener('click', () => {
+    //  //const canvas = document.getElementById('canvas');
+    //  const link = document.createElement('a');
+    //  link.download = 'output.jpg';
+    //  link.href = canvas.toDataURL('image/jpeg', compression); // quality .7
+    //  link.click();
+    //});
+
+    // save button listener (switch)
     save.addEventListener('click', () => {
-      const canvas = document.getElementById('canvas');
       const link = document.createElement('a');
       link.download = 'output.jpg';
-      link.href = canvas.toDataURL('image/jpeg', compression); // quality .7
+
+      // if canvas2 is visible, save it - else save main canvas
+      const targetCanvas = !canvas2.classList.contains('hidden') ? canvas2 : canvas;
+
+      link.href = targetCanvas.toDataURL('image/jpeg', compression);
       link.click();
     });
 
@@ -342,6 +478,12 @@
     // disable canvas m2
     canvas.addEventListener('contextmenu', function(e) {
       e.preventDefault();
+    });
+
+    // threshold slider listener
+    thresholdSlider.addEventListener('input', () => {
+      threshold = parseFloat(thresholdSlider.value);
+      thresholdValue.textContent = threshold.toFixed(2);
     });
 
     // debug
